@@ -1,0 +1,14 @@
+.env
+composer.lock
+package-lock.json
+
+/public/storage
+/public/assets
+/public/images
+/public/mix-manifest.json
+
+/node_modules
+/vendor
+
+_ide_helper.php
+.phpstorm.meta.php

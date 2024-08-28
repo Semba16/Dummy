@@ -1,0 +1,184 @@
+name: Perform checks for programmer work.
+run-name: ${{ gitea.actor }} is running Gitea Actions 🚀
+
+on:
+  push:
+    branches-ignore:
+      - master
+      - main
+      - develop
+
+jobs:
+  notification_starting:
+    name: "Preparation"
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: "🛎 Notification: Starting"
+        uses: mattermost/action-mattermost-notify@master
+        with:
+          MATTERMOST_WEBHOOK_URL: https://office.dlabs.id/hooks/mp1qz6hteir5fjdrxp8b6e9r1a
+          MATTERMOST_CHANNEL: "Jenkins"
+          TEXT: |
+            Starting CICD ${{ github.repository }}.
+            [Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}) was starting :runner:.
+          MATTERMOST_USERNAME: system
+          MATTERMOST_ICON_URL: https://cdn3.iconfinder.com/data/icons/system-basic-vol-4-1/20/icon-note-attention-alt3-512.png
+
+  test_backend:
+    name: "Testing: Backend"
+    runs-on: ubuntu-latest
+    needs: [ notification_starting ]
+    # container:
+    #   image: kirschbaumdevelopment/laravel-test-runner:7.3
+
+    steps:
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+      # - name: "Cache: Composer Dependencies"
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: /tmp/composer-cache
+      #     key: ${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+
+      # This is expected to using this actions
+      # - name: Install Composer 🛎
+      #   uses: php-actions/composer@v6
+      #   with:
+      #     php_extensions: redis exif
+      #     php_version: "8.2"
+      #     version: latest
+
+      - name: "👨‍💻 Setup: PHP & Composer"
+        uses: shivammathur/setup-php@master
+        with:
+          php-version: '8.2'
+          extensions: mbstring, bcmath, intl, gd
+          ini-values: post_max_size=50M, max_execution_time=60
+          # coverage: none
+
+      - name: "👨‍💻 Composer: Install Dependencies"
+        run: composer install
+      # composer update
+        #  -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+
+      # - name: Get Composer Cache Directory
+      #   id: composer-cache
+      #   run: |
+      #     echo "dir=$(composer config cache-files-dir)" >> $GITLAB_OUTPUT
+      #     echo $(composer config cache-files-dir)
+
+      # - name: Cache composer 📦
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ${{ steps.composer-cache.outputs.dir }}
+      #     key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-composer-
+
+      # - name: FIX Code Style
+      #   if: ${{ always() }}
+      #   run: |
+      #     ./vendor/bin/pint
+
+      - name: "🚦 Test: Migration"
+        run: |
+          cp .env.testing .env
+          php artisan db:create app_test_${{ github.run_id }}
+          sed -i 's/app_test/app_test_${{ github.run_id }}/' .env
+          php artisan migrate --seed
+        post: echo "POST STEP"
+
+      # - name: Unit Test
+      #   run: |
+      #     nohup php artisan serve --port=80
+      #     php artisan test
+
+      - name: "🧹️ Migration Cleanup"
+        if: ${{ always() }}
+        run: |
+          php artisan db:drop app_test_${{ github.run_id }}
+
+  test_frontend:
+    name: "Testing: Frontend"
+    runs-on: ubuntu-latest
+    needs: [ notification_starting ]
+    # container:
+    #   image: kirschbaumdevelopment/laravel-test-runner:7.3
+
+    steps:
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+        # with:
+        #   ref: develop
+        #   path: maka_develop
+
+      - name: "👨‍💻 Setup: NodeJs & NPM"
+        uses: actions/setup-node@v4
+        with:
+          node-version: v20.10.0
+
+      # - name: Get npm cache directory
+      #   id: npm-cache-dir
+      #   shell: bash
+      #   run: echo "dir=$(npm config get cache)" >> ${GITHUB_OUTPUT}
+
+      # - name: Cache node_modules 📦
+      #   id: npm-cache # use this to check for `cache-hit` ==> if: steps.npm-cache.outputs.cache-hit != 'true'
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.npm
+      #     key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-node-
+
+      - name: "👨‍💻 NPM: Install Dependencies"
+        # env:
+          # NODE_OPTIONS: --openssl-legacy-provider
+        run: |
+          npm i
+          npx browserslist@latest --update-db
+
+      - name: "🏗 Build: Asset"
+        # env:
+          # NODE_OPTIONS: --openssl-legacy-provider
+        run: |
+          npm run prod
+
+      # We need it!
+      # - name: Put built assets in Artifacts
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: assets
+      #     path: public
+      #     retention-days: 3
+
+  notification_finishing:
+    name: "Post Workflow"
+    runs-on: ubuntu-latest
+    needs: [ test_frontend, test_backend ]
+    steps:
+      - name: "🛎 Notification: Success"
+        uses: mattermost/action-mattermost-notify@master
+        if: success()
+        with:
+          MATTERMOST_WEBHOOK_URL: https://office.dlabs.id/hooks/mp1qz6hteir5fjdrxp8b6e9r1a
+          MATTERMOST_CHANNEL: "Jenkins"
+          TEXT: |
+            POST CICD ${{ github.repository }}.
+            [Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}) was SUCCESS :white_check_mark:
+          MATTERMOST_USERNAME: system
+          MATTERMOST_ICON_URL: https://cdn3.iconfinder.com/data/icons/system-basic-vol-4-1/20/icon-note-attention-alt3-512.png
+
+      - name: "🛎 Notification: Failure"
+        uses: mattermost/action-mattermost-notify@master
+        if: failure()
+        with:
+          MATTERMOST_WEBHOOK_URL: https://office.dlabs.id/hooks/mp1qz6hteir5fjdrxp8b6e9r1a
+          MATTERMOST_CHANNEL: "Jenkins"
+          TEXT: |
+            POST CICD ${{ github.repository }}.
+            [Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}) was FAILED :x:
+          MATTERMOST_USERNAME: system
+          MATTERMOST_ICON_URL: https://cdn3.iconfinder.com/data/icons/system-basic-vol-4-1/20/icon-note-attention-alt3-512.png
